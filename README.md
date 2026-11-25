@@ -159,7 +159,7 @@ sequenceDiagram
     participant T as Transport (UDP)
     participant A as AuthProvider
     participant R as RegistryActor
-    participant Actor as AllocationActor
+    participant Alloc as AllocationActor
     participant Peer as Remote Peer
 
     C->>T: STUN Binding Request
@@ -170,28 +170,28 @@ sequenceDiagram
     A-->>T: Valid (username, max_lifetime)
     T->>R: RegistryCmd::Allocate { client_addr, username, ... }
     R->>R: Reserve relay port & bind UdpSocket
-    R->>Actor: tokio::spawn(AllocationActor)
+    R->>Alloc: tokio::spawn(AllocationActor)
     R-->>T: Ok(AllocationInfo { id, relayed_addr, lifetime_secs })
     T-->>C: TURN Allocate Success (XOR-RELAYED-ADDRESS, LIFETIME)
 
     C->>T: TURN CreatePermission / ChannelBind
-    T->>Actor: AllocationCmd::CreatePermission / ChannelBind (oneshot)
-    Actor-->>T: Ok(())
+    T->>Alloc: AllocationCmd::CreatePermission / ChannelBind (oneshot)
+    Alloc-->>T: Ok(())
     T-->>C: Success Response
 
     loop Media Relay (SRTP over UDP)
         C->>T: ChannelData / Send Indication
-        T->>Actor: AllocationCmd::SendOnChannel / SendToPeer (Bytes)
-        Actor->>Peer: relayed_socket.send_to(payload, peer_addr)
-        Peer-->>Actor: relayed_socket.recv_from(buf)
-        Actor->>R: RegistryEvent::RelayedFromPeer (Bytes)
+        T->>Alloc: AllocationCmd::SendOnChannel / SendToPeer (Bytes)
+        Alloc->>Peer: relayed_socket.send_to(payload, peer_addr)
+        Peer-->>Alloc: relayed_socket.recv_from(buf)
+        Alloc->>R: RegistryEvent::RelayedFromPeer (Bytes)
         R->>T: Forward to client transport
         T-->>C: ChannelData / Data Indication
     end
 
     alt Lifetime expires or Shutdown
-        Actor->>Actor: sleep_until(expires_at) elapses / Shutdown cmd
-        Actor->>R: RegistryEvent::AllocationClosed { id, bytes_relayed }
+        Alloc->>Alloc: sleep_until(expires_at) elapses / Shutdown cmd
+        Alloc->>R: RegistryEvent::AllocationClosed { id, bytes_relayed }
         R->>R: Release port & remove from routing table
     end
 ```
@@ -205,7 +205,7 @@ stateDiagram-v2
     Active --> Active: CreatePermission / ChannelBind
     Active --> Active: SendToPeer / RelayedFromPeer
     Active --> Closing: Lifetime Expired
-    Active --> Closing: AllocationCmd::Shutdown / SIGTERM
+    Active --> Closing: Allocation shutdown command / SIGTERM
     Closing --> [*]: Drop Socket & Emit AllocationClosed
 ```
 
