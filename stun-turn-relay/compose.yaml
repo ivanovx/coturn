@@ -1,0 +1,45 @@
+services:
+  relay:
+    build: .
+    image: stun-turn-relay:latest
+    restart: unless-stopped
+    environment:
+      # TURN port: the listener and the published port are driven by the same variable.
+      LISTEN_ADDR: 0.0.0.0:${TURN_PORT:-3478}
+      EXTERNAL_IP: ${EXTERNAL_IP:?set EXTERNAL_IP to the address peers can reach (public IP of the host)}
+      AUTH_SECRET: ${AUTH_SECRET:?set AUTH_SECRET (>= 16 chars), the same secret the backend signs with}
+      # sha1 = coturn use-auth-secret compatible, sha256 = default, "sha1,sha256" = migration mode.
+      AUTH_HMAC_ALGO: ${AUTH_HMAC_ALGO:-sha256}
+      # How long after expiry credentials still work for an EXISTING allocation (long calls).
+      CREDENTIAL_GRACE_SECS: ${CREDENTIAL_GRACE_SECS:-3600}
+      REALM: ${REALM:-relay}
+      RELAY_MIN_PORT: ${RELAY_MIN_PORT:-49152}
+      RELAY_MAX_PORT: ${RELAY_MAX_PORT:-49352}
+      MAX_ALLOCATIONS: ${MAX_ALLOCATIONS:-2000}
+      MAX_ALLOCATIONS_PER_USER: ${MAX_ALLOCATIONS_PER_USER:-16}
+      ALLOCATION_LIFETIME_SECS: ${ALLOCATION_LIFETIME_SECS:-300}
+      CHANNEL_CAP: ${CHANNEL_CAP:-512}
+      # Optional coturn-style peer rules (comma separated: IP, CIDR or start-end range).
+      ALLOWED_PEER_IPS: ${ALLOWED_PEER_IPS:-}
+      DENIED_PEER_IPS: ${DENIED_PEER_IPS:-}
+      # Set to 0.0.0.0:9100 to enable /metrics inside the container, and uncomment the port below.
+      METRICS_ADDR: ${METRICS_ADDR:-}
+      RUST_LOG: ${RUST_LOG:-info}
+    # The published ports are derived from the same variables as the configuration, so they cannot drift.
+    # Every allocation uses one relay port: the range size is the maximum number of concurrent allocations.
+    ports:
+      - "${TURN_PORT:-3478}:${TURN_PORT:-3478}/udp"
+      - "${RELAY_MIN_PORT:-49152}-${RELAY_MAX_PORT:-49352}:${RELAY_MIN_PORT:-49152}-${RELAY_MAX_PORT:-49352}/udp"
+      # - "127.0.0.1:9100:9100"   # metrics, keep it internal
+    # TURN-over-TCP/TLS is NOT supported by this server (UDP only).
+    # For high-throughput Linux hosts (avoids Docker's UDP NAT): remove `ports`
+    # and use host networking instead, with an explicit EXTERNAL_IP.
+    # network_mode: host
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    # SIGTERM triggers graceful shutdown (allocations closed, telemetry flushed).
+    stop_signal: SIGTERM
+    stop_grace_period: 10s
